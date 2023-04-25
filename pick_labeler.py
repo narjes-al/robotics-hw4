@@ -29,7 +29,10 @@ class GraspLabeler:
         # TODO: complete this method
         # set gripping point self.coord to the left mouse button clicked point
         # ===============================================================================
-        pass
+        
+        if action == cv2.EVENT_LBUTTONDOWN:
+            self.coord = (int(x), int(y))
+
         # ===============================================================================
         
     def __call__(self, img: np.ndarray
@@ -59,7 +62,8 @@ class GraspLabeler:
                 # rotate gripper counter clockwise by angle_delta
                 # by changing self.angle
                 # ===============================================================================
-                pass
+                self.angle -= self.angle_delta 
+
                 # ===============================================================================
                 
             elif key == ord('d'):
@@ -67,7 +71,9 @@ class GraspLabeler:
                 # rotate gripper clockwise by angle_delta
                 # by changing self.angle
                 # ===============================================================================
-                pass
+            
+                self.angle += self.angle_delta
+                
                 # ===============================================================================
             elif key == 13:
                 # print('enter')
@@ -76,7 +82,7 @@ class GraspLabeler:
 
 
 def main():
-    env = UR5PickEnviornment(gui=True)
+    env = UR5PickEnviornment(gui=False)
     names = get_splits()['train']
     n_picks = 12
 

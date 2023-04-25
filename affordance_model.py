@@ -55,7 +55,37 @@ class AffordanceDataset(Dataset):
         # Hint: Use get_gaussian_scoremap
         # Hint: https://imgaug.readthedocs.io/en/latest/source/examples_keypoints.html
         # ===============================================================================
-        data = dict(input=None, target=None)
+        
+        rgb_img = data['rgb'].detach().numpy()
+        angle = float(data['angle'].detach().numpy())
+        cent_pt = data['center_point'].detach().numpy()
+
+        H = rgb_img.shape[0]
+        W = rgb_img.shape[1]
+
+        x_cent = cent_pt[0]
+        y_cent = cent_pt[1]
+
+        shape = rgb_img.shape
+
+        rot = iaa.Affine(rotate=angle)
+        kps = KeypointsOnImage([Keypoint(x=x_cent, y=y_cent)], shape=shape)
+        aug_rgb, aug_kps = rot(image=rgb_img, keypoints=kps)
+
+        aug_x_center = aug_kps.keypoints[0].x
+        aug_y_center = aug_kps.keypoints[0].y
+
+        aug_cent_pt = np.array([aug_x_center, aug_y_center])
+
+        input_tensor = torch.from_numpy(aug_rgb).to(dtype=torch.float32)
+        input_tensor = input_tensor/255.0
+        input_tensor = input_tensor.permute(2,0,1)
+
+        target_tensor = torch.tensor(get_gaussian_scoremap((H,W), aug_cent_pt), dtype=torch.float32)
+        target_tensor = target_tensor.unsqueeze(2).permute(2,0,1)
+
+        data = dict(input=input_tensor, target=target_tensor)
+
         return data 
 
 
@@ -168,14 +198,82 @@ class AffordanceModel(nn.Module):
         # TODO: (problem 2) complete this method (prediction)
         # Hint: why do we provide the model's device here?
         # ===============================================================================
+        
+        
+        best_point = (0,0)
+        best_angle = 0
+        best_img_idx = -1
+        best_val = -float('inf')
+
+        imgs = list()
+    
+        self.eval()
+
+        with torch.no_grad():
+
+            for i in range(8):
+
+                angle = 22.5*i
+
+                seq = iaa.Aggine(rotate=angle)
+
+                aug_img = seq(image=rgb_obs)
+
+                input_tensor = torch.from_numpy(aug_img).to(torch.float32)
+                input_tensor = input_tensor/255.0
+                input_tensor = input_tensor.permute(2,0,1).unsqueeze(0).to(device)
+
+                prediction = self.predict(input_tensor)
+
+                for y in range(prediction.shape[2]):
+                    for x in range(prediction.shape[3]):
+
+                        curr_val = float(prediction[0,0,y,x])
+                        if curr_val > best_val:
+                            best_point = (x,y)
+                            best_angle = angle
+                            bes_img_idx = i
+                            best_val = curr_val
+
+                pred_img = torch.squeeze(prediction, 0)
+                pred_img = pred_img.detach().numpy()
+
+                input_img = input_tensor.squeeze(0).detach().numpy()
+                
+                vis_img = self.visualize(input_img, pred_img)
+                imgs.append(vis_img)
+
         coord, angle = None, None 
+
+        angle = -1*best_angle
+
+        kps = KeypointsOnImage([Keypoint(x=best_point[0], y=best_point[1])], shape=rgb_obs.shape)
+        rot = iaa.Affine(rotate = angle)
+        aug_kps = rot(Keypoints=kps)
+
+        aug_x = int(aug_kps.keypoints[0].x)
+        aug_y = int(aug_kps.keypoints[0].y)
+
+        coord = (aug_x, aug_y)
+
         # ===============================================================================
 
         # TODO: (problem 3, skip when finishing problem 2) avoid selecting the same failed actions
         # ===============================================================================
+
         for max_coord in list(self.past_actions):  
             bin = max_coord[0] 
             # supress past actions and select next-best action
+            """
+            supression_map = get_gaussian_scoremap(shape=, keypoint=, sigma=4)
+            affordance_map[bin] -=
+
+
+        max_coord = 
+        self.past_actions.append(max_coord)
+    
+        """
+
         # ===============================================================================
         
         # TODO: (problem 2) complete this method (visualization)
@@ -185,6 +283,15 @@ class AffordanceModel(nn.Module):
         # Hint: draw a grey (127,127,127) line on the bottom row of each image.
         # ===============================================================================
         vis_img = None
+
+        draw_grasp(imgs[best_img_idx], best_point, 0)
+
+        img_right = (np.concatenate(imgs[4:], axis=0)).astype(np.uint8)
+        img_left = (np.concatenate(imgs[:4], axis=0)).astype(np.uint8)
+
+        img = [img_left, img_right]
+        vis_img = (np.concatenate(img, axis=1)).astype(np.uint8)
+
         # ===============================================================================
         return coord, angle, vis_img
 

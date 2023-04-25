@@ -100,6 +100,13 @@ def get_center_angle(
     # Hint: it's a hack
     # ===============================================================================
     center_coord, angle = None, None
+
+    center_coord = (left_coord+right_coord) / 2.0
+
+    direction = right_coord - left_coord
+    rad = np.arctan(direction[1], direction[0])
+    angle = np.rad2deg(rad)
+
     return center_coord, angle
 
 
@@ -264,12 +271,14 @@ def main():
     model = model_class(pretrained=True)
     model.to(device)
 
+    model, epoch, best_loss = load_chkpt(model, chkpt_path, device)
+
     criterion = model.get_criterion()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3)
 
-    epoch = 1
-    best_loss = float('inf')
+    #epoch = 1
+    #best_loss = float('inf')
     while epoch <= max_epochs:
         print('Start epoch', epoch)
         train_loss = train(model, train_loader, criterion, optimizer, epoch, device)

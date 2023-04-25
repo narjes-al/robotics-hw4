@@ -38,7 +38,30 @@ class ActionRegressionDataset(Dataset):
         data = self.raw_dataset[idx]
         # TODO: complete this method
         # ===============================================================================
-        return dict()
+
+        data_dict = dict()
+
+        input = data['rgb'].permute(2,0,1).float() / 255.0
+
+        center_coord = data['center_point'].numpy()
+        angle = data['angle'].numpy
+
+        x_scaled = center_coord[0]/128
+        y_scaled = center_coord[1]/128
+        angle_scaled = float(angle)/180
+
+        target = torch.from_numpy(np.array([x_scaled, y_scaled, angle_scaled])).to(dtype=torch.float32)
+
+        """
+        target_tensor = torch.tensor(data['target']).float()
+        target_tensor[0] /= data['center_point'][0]
+        target_tensor[1] /= data['center_point'][0]
+        target_tensor[2] /= data['angle']
+        """
+
+        data_dict = {'input': input, 'target': target}
+        
+        return data_dict
         # ===============================================================================
 
 
@@ -55,6 +78,17 @@ def recover_action(
     # TODO: complete this function
     # =============================================================================== 
     coord, angle = None, None
+
+    w = shape[0]
+    x = int(action[0] * w)
+
+    h = shape[1]
+    y = int(action[1] * h)
+
+    coord = (x, y)
+
+    angle = float(action[2] * 180)
+
     # ===============================================================================
     return coord, angle
 
@@ -96,7 +130,7 @@ class ActionRegressionModel(nn.Module):
         """
         # TODO: complete this method
         # =============================================================================== 
-        return nn.Module()
+        return nn.L1Loss()
         # =============================================================================== 
 
     @staticmethod
@@ -131,6 +165,26 @@ class ActionRegressionModel(nn.Module):
         # Hint: why do we provide the model's device here?
         # ===============================================================================
         coord, angle = None, None
+
+        self.eval()
+
+        with torch.no_grad():
+
+            rgb_tensor = torch.from_numpy(rgb_obs).to(torch.float32)
+            
+            input_tensor = torch.permute(rgb_tensor, (2,0,1)).div(255.0).unsqueeze(0).to(device)
+
+            prediction = self.predict(input_tensor).detach().numpy()
+
+            x = prediction[0,0]
+            y = prediction[0,1]
+            angle = prediction[0,2]
+            action = np.array([x, y, angle])
+
+            coord, angle = recover_action(action)
+
+            input = input_tensor.squeeze(0).detach().numpy()
+
         # ===============================================================================
         # visualization
         vis_img = self.visualize(input, action)
