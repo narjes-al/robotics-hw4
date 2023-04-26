@@ -52,14 +52,14 @@ def main():
     model.eval()
 
     # load env
-    env = UR5PickEnviornment(gui=not args.headless)
+    #env = UR5PickEnviornment(gui=not args.headless)
+    env = UR5PickEnviornment(gui=False)
     
     if args.task == 'pick_training':
         names = get_splits()['train']
         n_attempts = 3
         vis_dir = os.path.join(model_dir, 'eval_pick_training_vis')
         pathlib.Path(vis_dir).mkdir(parents=True, exist_ok=True)
-
         results = list()
         for name_idx, name in enumerate(names):
             print('Picking: {}'.format(name))
@@ -100,6 +100,7 @@ def main():
             print('Picking: {}'.format(name))
             env.remove_objects()
             for i in range(n_attempts):
+                #result = None
                 print('Attempt: {}'.format(i))
                 seed = name_idx * 100 + i + 10000
                 if i == 0:
@@ -107,6 +108,9 @@ def main():
                 else:
                     env.reset_objects(seed)
                 model.past_actions = deque(maxlen=args.n_past_actions)
+                ####
+                #result = None
+                ####
                 for j in range(args.n_past_actions):
                     rgb_obs, depth_obs, _ = env.observe()
                     coord, angle, vis_img = model.predict_grasp(rgb_obs)

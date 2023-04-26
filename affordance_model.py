@@ -11,6 +11,8 @@ from imgaug.augmentables import Keypoint, KeypointsOnImage
 from common import draw_grasp
 from collections import deque
 
+import cv2
+
 def get_gaussian_scoremap(
         shape: Tuple[int, int], 
         keypoint: np.ndarray, 
@@ -55,38 +57,103 @@ class AffordanceDataset(Dataset):
         # Hint: Use get_gaussian_scoremap
         # Hint: https://imgaug.readthedocs.io/en/latest/source/examples_keypoints.html
         # ===============================================================================
-        
+
+        # checkout train.RGBDataset for the content of data
         rgb_img = data['rgb'].detach().numpy()
         angle = float(data['angle'].detach().numpy())
         cent_pt = data['center_point'].detach().numpy()
 
-        H = rgb_img.shape[0]
-        W = rgb_img.shape[1]
+        # Bin the angle
+        #angle_bins = np.arange(-157.5, 180, 22.5)
+        #bin_idx = np.argmin(np.abs(angle - angle_bins))
 
-        x_cent = cent_pt[0]
-        y_cent = cent_pt[1]
+        bin_size = 22.5
+        binned_angle = round(angle / bin_size) * bin_size
 
-        shape = rgb_img.shape
+        # Rotate the RGB image
+        rotation = iaa.Rotate(binned_angle)
+        aug_img = rotation(image=rgb_img)
+
+        # Compute the target
+        H, W, _ = rgb_img.shape
+        
+        kps = KeypointsOnImage([Keypoint(x=cent_pt[0], y=cent_pt[1])], shape=(H, W))
+        aug_kps = rotation.augment_keypoints(kps)
+        aug_cent_pt = np.array([aug_kps.keypoints[0].x, aug_kps.keypoints[0].y])
+        scoremap = get_gaussian_scoremap((H, W), aug_cent_pt)
+
+        # Convert to torch tensors
+        input_tensor = torch.from_numpy(aug_img).to(dtype=torch.float32).permute(2, 0, 1) / 255.0
+        target_tensor = torch.from_numpy(scoremap).to(dtype=torch.float32).unsqueeze(0)
+
+        """
+        # Binning the angle to 22.5-degree intervals
+        bin_size = 22.5
+        binned_angle = int(round(angle / bin_size)) * bin_size
+        
+        # Rotate the RGB image using the binned angle
+        rotation = iaa.Rotate(angle=binned_angle)
+        aug_data = rotation(image=rgb_img.numpy(), keypoints=center_point)
+
+        # Extract augmented data
+        aug_rgb_img = torch.from_numpy(aug_data['image']).permute(2, 0, 1).float() / 255.0
+        aug_center_point = np.array([kp.x, kp.y], dtype=np.float32)
+
+        seq = iaa.Sequential([
+            iaa.Rotate((-binned_angle, -binned_angle))
+        ])
+        aug = seq(image=rgb.numpy())
+        aug_tensor = torch.from_numpy(aug)
+        
+        # Convert center point to numpy array
+        center_point = center_point.numpy()
+        
+        
+        # Get the target scoremap using the rotated center point
+        target = get_gaussian_scoremap(aug.shape[:2], center_point)
+        target_tensor = torch.from_numpy(target)
+        target_tensor = target_tensor.unsqueeze(0)
+        
+        # Scale the input tensor from [0, 255] to [0, 1]
+        input_tensor = aug_tensor.permute(2, 0, 1).float() / 255.0
+        
+        # Return the input and target tensors as a dictionary
+        data = {
+            'input': input_tensor,
+            'target': target_tensor
+        }
+        return data
+        """
+
+        """
+        rgb_img = data['rgb'].detach().numpy()
+        angle = float(data['angle'].detach().numpy())
+        cent_pt = data['center_point'].detach().numpy()
+
+        H, W, C = rgb_img.shape
 
         rot = iaa.Affine(rotate=angle)
-        kps = KeypointsOnImage([Keypoint(x=x_cent, y=y_cent)], shape=shape)
-        aug_rgb, aug_kps = rot(image=rgb_img, keypoints=kps)
+        kps = KeypointsOnImage([Keypoint(x=cent_pt[0], y=cent_pt[1])], shape=rgb_img.shape)
+        aug_img, aug_kps = rot(image=rgb_img, keypoints=kps)
 
         aug_x_center = aug_kps.keypoints[0].x
         aug_y_center = aug_kps.keypoints[0].y
 
         aug_cent_pt = np.array([aug_x_center, aug_y_center])
 
-        input_tensor = torch.from_numpy(aug_rgb).to(dtype=torch.float32)
-        input_tensor = input_tensor/255.0
-        input_tensor = input_tensor.permute(2,0,1)
+        input_tensor = torch.from_numpy(aug_img).to(torch.float32)
+        input_tensor = input_tensor.permute(2,0,1) /255.0
 
-        target_tensor = torch.tensor(get_gaussian_scoremap((H,W), aug_cent_pt), dtype=torch.float32)
-        target_tensor = target_tensor.unsqueeze(2).permute(2,0,1)
+        target_tensor = torch.from_numpy(get_gaussian_scoremap((H,W), aug_cent_pt)).to(torch.float32)
+        target_tensor = target_tensor.unsqueeze(0)
 
         data = dict(input=input_tensor, target=target_tensor)
 
-        return data 
+        """ 
+
+        data = {'input': input_tensor, 'target': target_tensor}
+
+        return data
 
 
 class AffordanceModel(nn.Module):
@@ -200,78 +267,95 @@ class AffordanceModel(nn.Module):
         # ===============================================================================
         
         
-        best_point = (0,0)
+        # Initialize variables
+        NUM_ROTATIONS = 8   
+        best_point = (0, 0)
         best_angle = 0
-        best_img_idx = -1
         best_val = -float('inf')
+        imgs = []
+        coord = (-1, -1)
+        angle = -1
 
-        imgs = list()
-    
+        affordance_map = None
+
+        # Evaluate the model on each rotated image
         self.eval()
 
         with torch.no_grad():
 
-            for i in range(8):
+            for i in range(NUM_ROTATIONS):
 
                 angle = 22.5*i
-
-                seq = iaa.Aggine(rotate=angle)
-
-                aug_img = seq(image=rgb_obs)
+                
+                # Rotate the RGB image
+                rotation = iaa.Rotate(angle)
+                aug_img = rotation(image=rgb_obs)
 
                 input_tensor = torch.from_numpy(aug_img).to(torch.float32)
-                input_tensor = input_tensor/255.0
-                input_tensor = input_tensor.permute(2,0,1).unsqueeze(0).to(device)
-
-                prediction = self.predict(input_tensor)
-
-                for y in range(prediction.shape[2]):
-                    for x in range(prediction.shape[3]):
-
-                        curr_val = float(prediction[0,0,y,x])
-                        if curr_val > best_val:
-                            best_point = (x,y)
-                            best_angle = angle
-                            bes_img_idx = i
-                            best_val = curr_val
-
-                pred_img = torch.squeeze(prediction, 0)
-                pred_img = pred_img.detach().numpy()
-
-                input_img = input_tensor.squeeze(0).detach().numpy()
+                input_tensor /= 255.0
+                input_tensor = input_tensor.permute(2, 0, 1).unsqueeze(0).to(device)
                 
+                affordance_map = self.predict(input_tensor)
+                affordance_map = torch.clip(affordance_map,0,1)
+
+                # Find the best grasp point and angle
+                idx = np.argmax(affordance_map)
+                _,_,y,x = np.unravel_index(idx, affordance_map.shape)
+                #affordance_map = affordance_map.cpu().numpy()
+                curr_val = float(affordance_map[0, 0, y, x])
+
+                if curr_val > best_val:
+                    best_point = (x, y)
+                    best_angle = angle
+                    best_val = curr_val
+
+                # Visualize the prediction
+                pred_img = torch.squeeze(affordance_map, 0)
+                pred_img = pred_img.detach().numpy()
+                input_img = input_tensor.squeeze(0).detach().numpy()
                 vis_img = self.visualize(input_img, pred_img)
+                draw_grasp(vis_img, best_point, best_angle)
+
                 imgs.append(vis_img)
 
-        coord, angle = None, None 
+        # Rotate the grasp point and angle back to the original image orientation
+        
+        angle = -best_angle
+        
+        rotation = iaa.Rotate(angle)
 
-        angle = -1*best_angle
-
-        kps = KeypointsOnImage([Keypoint(x=best_point[0], y=best_point[1])], shape=rgb_obs.shape)
-        rot = iaa.Affine(rotate = angle)
-        aug_kps = rot(Keypoints=kps)
+        H, W, _ = rgb_obs.shape
+        
+        kps = KeypointsOnImage([Keypoint(x=best_point[0], y=best_point[1])], shape=(H, W))
+        aug_kps = rotation.augment_keypoints(kps)
 
         aug_x = int(aug_kps.keypoints[0].x)
         aug_y = int(aug_kps.keypoints[0].y)
-
         coord = (aug_x, aug_y)
 
         # ===============================================================================
 
         # TODO: (problem 3, skip when finishing problem 2) avoid selecting the same failed actions
         # ===============================================================================
+        """
+        score_map = prediction[0,0].cpu().numpy()
+        affordance_map = dict()
 
         for max_coord in list(self.past_actions):  
+
             bin = max_coord[0] 
             # supress past actions and select next-best action
-            """
-            supression_map = get_gaussian_scoremap(shape=, keypoint=, sigma=4)
-            affordance_map[bin] -=
+            x, y = max_coord[1]
+            supression_map = get_gaussian_scoremap(shape=score_map.shape, keypoint=(y,x), sigma=4)
+            affordance_map[bin] -= supression_map
 
 
-        max_coord = 
+        idx = np.argmax(affordance_map)
+        y, x = np.unravel_index(idx, affordance_map.shape)
+        curr_val = score_map[y,x]
+        max_coord = (bin, (x, y))
         self.past_actions.append(max_coord)
-    
+
         """
 
         # ===============================================================================
@@ -282,15 +366,19 @@ class AffordanceModel(nn.Module):
         # Hint: see self.visualize
         # Hint: draw a grey (127,127,127) line on the bottom row of each image.
         # ===============================================================================
-        vis_img = None
 
-        draw_grasp(imgs[best_img_idx], best_point, 0)
+        # Visualize the prediction as a single image
 
-        img_right = (np.concatenate(imgs[4:], axis=0)).astype(np.uint8)
-        img_left = (np.concatenate(imgs[:4], axis=0)).astype(np.uint8)
-
-        img = [img_left, img_right]
-        vis_img = (np.concatenate(img, axis=1)).astype(np.uint8)
+        for img in imgs:
+            cv2.line(img, (0, img.shape[0] - 1), (img.shape[1], img.shape[0] - 1), (127, 127, 127), 1)
+        
+        left_imgs = imgs[:NUM_ROTATIONS // 2]
+        right_imgs = imgs[NUM_ROTATIONS // 2:]
+        
+        left_img = np.concatenate(left_imgs, axis=0).astype(np.uint8)
+        right_img = np.concatenate(right_imgs, axis=0).astype(np.uint8)
+        
+        vis_img = np.concatenate([left_img, right_img], axis=1).astype(np.uint8)
 
         # ===============================================================================
         return coord, angle, vis_img

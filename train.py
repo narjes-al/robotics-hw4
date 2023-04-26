@@ -55,10 +55,15 @@ class RGBDataset(Dataset):
         key, label = self.label_pairs[idx]
         img_path = os.path.join(self.labels_dir, '{}_rgb.png'.format(key))
         rgb = read_rgb_cached(img_path)
+
+        pos_angle = label[2]
+        if label[2] < 0:
+            pos_angle = 180.0 - label[2]
+
         data = {
             'rgb': rgb,
             'center_point': np.array(label[:2], dtype=np.float32),
-            'angle': np.array(label[2], dtype=np.float32)
+            'angle': np.array(pos_angle, dtype=np.float32)
         }
         data_torch = dict()
         for key, value in data.items():
@@ -104,7 +109,7 @@ def get_center_angle(
     center_coord = (left_coord+right_coord) / 2.0
 
     direction = right_coord - left_coord
-    rad = np.arctan(direction[1], direction[0])
+    rad = np.arctan2(direction[1], direction[0])
     angle = np.rad2deg(rad)
 
     return center_coord, angle
@@ -132,7 +137,35 @@ class AugmentedDataset(Dataset):
         # TODO: complete this method 
         # Hint: https://imgaug.readthedocs.io/en/latest/source/examples_keypoints.html 
         # Hint: use get_finger_points and get_center_angle
+
+        cent_pt = data_torch['center_point'].detach().numpy()
+        angle = data_torch['angle'].detach().numpy()
+        img = data_torch['rgb'].detach().numpy()
+
+        left_coord, right_coord = get_finger_points(cent_pt, angle)
+
+        kps = KeypointsOnImage([Keypoint(x=left_coord[0], y=left_coord[1]), 
+                                Keypoint(x=right_coord[0], y=right_coord[1])], 
+                                shape=img.shape)
         
+        img_aug, aug_kps = self.aug_pipeline(image=img, keypoints=kps)
+
+        left_coord = np.array([aug_kps.keypoints[0].x, aug_kps.keypoints[0].y])
+        right_coord = np.array([aug_kps.keypoints[1].x, aug_kps.keypoints[1].y])
+
+        cent_pt, angle = get_center_angle(left_coord, right_coord)
+
+        data = {
+            'rgb': img_aug,
+            'center_point': cent_pt,
+            'angle': np.array(angle, dtype=np.float32)
+        }
+
+        data_torch = dict()
+
+        for key, value in data.items():
+            data_torch[key] = torch.from_numpy(value)
+
         return data_torch
 
 
@@ -271,14 +304,14 @@ def main():
     model = model_class(pretrained=True)
     model.to(device)
 
-    model, epoch, best_loss = load_chkpt(model, chkpt_path, device)
+    #model, epoch, best_loss = load_chkpt(model, chkpt_path, device)
 
     criterion = model.get_criterion()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3)
 
-    #epoch = 1
-    #best_loss = float('inf')
+    epoch = 1
+    best_loss = float('inf')
     while epoch <= max_epochs:
         print('Start epoch', epoch)
         train_loss = train(model, train_loader, criterion, optimizer, epoch, device)
@@ -290,10 +323,12 @@ def main():
         print('Test loss: %0.4f' % (test_loss))
         print('---------------------------------')
         # Save checkpoint if is best
+        print(test_loss, best_loss)
         if epoch % 5 == 0 and test_loss < best_loss:
             best_loss = test_loss
             save_chkpt(model, epoch, test_loss, chkpt_path)
             save_prediction(model, test_loader, dump_dir, BATCH_SIZE)
+
         epoch += 1
 
 if __name__ == "__main__":

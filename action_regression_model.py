@@ -44,11 +44,11 @@ class ActionRegressionDataset(Dataset):
         input = data['rgb'].permute(2,0,1).float() / 255.0
 
         center_coord = data['center_point'].numpy()
-        angle = data['angle'].numpy
+        angle = data['angle'].numpy()
 
         x_scaled = center_coord[0]/128
         y_scaled = center_coord[1]/128
-        angle_scaled = float(angle)/180
+        angle_scaled = angle/180.0
 
         target = torch.from_numpy(np.array([x_scaled, y_scaled, angle_scaled])).to(dtype=torch.float32)
 
