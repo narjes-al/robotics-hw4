@@ -71,15 +71,55 @@ def main():
                     env.load_ycb_objects([name], seed=seed)
                 else:
                     env.reset_objects(seed)
+
+                #######
                 
-                rgb_obs, depth_obs, _ = env.observe()
-                coord, angle, vis_img = model.predict_grasp(rgb_obs)
-                pick_pose = env.image_pose_to_pick_pose(coord, angle, depth_obs)
-                result = env.execute_grasp(*pick_pose)
-                print('Success!' if result else 'Failed:(')
-                fname = os.path.join(vis_dir, '{}_{}.png'.format(name, i))
-                imsave(fname, vis_img)
-                results.append(result)
+                if args.n_past_actions > 0:
+
+                    model.past_actions = deque(maxlen=args.n_past_actions)
+
+                    for j in range(args.n_past_actions):
+                        rgb_obs, depth_obs, _ = env.observe()
+                        coord, angle, vis_img = model.predict_grasp(rgb_obs)
+                        # NOTE: check if coord is out of original shape bound
+                        img_h, img_w = rgb_obs.shape[:2]
+                        coord = list(coord)
+                        coord[0] = max(coord[0], 0)
+                        coord[0] = min(coord[0], img_w-1)
+                        coord[1] = max(coord[1], 0)
+                        coord[1] = min(coord[1], img_h-1)
+                        coord = tuple(coord)
+
+                        pick_pose = env.image_pose_to_pick_pose(coord, angle, depth_obs)
+                        result = env.execute_grasp(*pick_pose)
+                        print('Success!' if result else 'Failed:(')
+                        fname = os.path.join(vis_dir, '{}_{}.png'.format(name, i))
+                        imsave(fname, vis_img)
+                        
+                        if args.save_data:
+                            write_rgb(rgb_obs, str(out_dir.joinpath('{}_{}_rgb.png'.format(name, i))))
+                            success = 1 if result else 0
+                            labels[name].append([coord[0], coord[1], angle, success])
+                            json.dump(labels, label_file.open('w'), indent=4)
+                        
+                        if result:
+                            break
+                        
+                    results.append(result)
+
+                #######
+
+                else:
+                
+                    rgb_obs, depth_obs, _ = env.observe()
+                    coord, angle, vis_img = model.predict_grasp(rgb_obs)
+                    pick_pose = env.image_pose_to_pick_pose(coord, angle, depth_obs)
+                    result = env.execute_grasp(*pick_pose)
+                    print('Success!' if result else 'Failed:(')
+                    fname = os.path.join(vis_dir, '{}_{}.png'.format(name, i))
+                    imsave(fname, vis_img)
+                    results.append(result)
+
         success_rate = np.array(results, dtype=np.float32).mean()
         print("Testing on training objects. Success rate: {}".format(success_rate))
 
@@ -108,9 +148,7 @@ def main():
                 else:
                     env.reset_objects(seed)
                 model.past_actions = deque(maxlen=args.n_past_actions)
-                ####
-                #result = None
-                ####
+
                 for j in range(args.n_past_actions):
                     rgb_obs, depth_obs, _ = env.observe()
                     coord, angle, vis_img = model.predict_grasp(rgb_obs)

@@ -304,14 +304,14 @@ def main():
     model = model_class(pretrained=True)
     model.to(device)
 
-    #model, epoch, best_loss = load_chkpt(model, chkpt_path, device)
+    model, epoch, best_loss = load_chkpt(model, chkpt_path, device)
 
     criterion = model.get_criterion()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3)
 
-    epoch = 1
-    best_loss = float('inf')
+    #epoch = 1
+    #best_loss = float('inf')
     while epoch <= max_epochs:
         print('Start epoch', epoch)
         train_loss = train(model, train_loader, criterion, optimizer, epoch, device)

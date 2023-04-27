@@ -52,13 +52,6 @@ class ActionRegressionDataset(Dataset):
 
         target = torch.from_numpy(np.array([x_scaled, y_scaled, angle_scaled])).to(dtype=torch.float32)
 
-        """
-        target_tensor = torch.tensor(data['target']).float()
-        target_tensor[0] /= data['center_point'][0]
-        target_tensor[1] /= data['center_point'][0]
-        target_tensor[2] /= data['angle']
-        """
-
         data_dict = {'input': input, 'target': target}
         
         return data_dict
@@ -170,23 +163,17 @@ class ActionRegressionModel(nn.Module):
 
         with torch.no_grad():
 
-            rgb_tensor = torch.from_numpy(rgb_obs).to(torch.float32)
+            rgb_tensor = torch.from_numpy(rgb_obs).to(torch.float32) / 255.0
+            input_tensor = rgb_tensor.permute(2,0,1).unsqueeze(0).to(device)
+
+            prediction = self.predict(input_tensor).squeeze().cpu().numpy()
             
-            input_tensor = torch.permute(rgb_tensor, (2,0,1)).div(255.0).unsqueeze(0).to(device)
-
-            prediction = self.predict(input_tensor).detach().numpy()
-
-            x = prediction[0,0]
-            y = prediction[0,1]
-            angle = prediction[0,2]
-            action = np.array([x, y, angle])
-
-            coord, angle = recover_action(action)
-
-            input = input_tensor.squeeze(0).detach().numpy()
+            coord, angle_deg = recover_action(prediction)
+        
 
         # ===============================================================================
         # visualization
-        vis_img = self.visualize(input, action)
-        return coord, angle, vis_img
+        rgb_img = input_tensor.squeeze(0).detach().cpu().numpy()
+        vis_img = self.visualize(rgb_img, prediction)
+        return coord, angle_deg, vis_img
 
