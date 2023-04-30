@@ -263,7 +263,7 @@ class AffordanceModel(nn.Module):
 
         # TODO: (problem 3, skip when finishing problem 2) avoid selecting the same failed actions
         # ===============================================================================
-        
+
         if len(self.past_actions) > 0:
 
             for max_coord in list(self.past_actions):  
@@ -294,6 +294,7 @@ class AffordanceModel(nn.Module):
 
         max_coord = (best_bin, coord)
         self.past_actions.append(max_coord)
+
         
         # ===============================================================================
         

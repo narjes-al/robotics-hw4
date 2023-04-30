@@ -104,7 +104,7 @@ def main():
                         
                         if result:
                             break
-                        
+
                     results.append(result)
 
                 #######
@@ -193,19 +193,56 @@ def main():
 
         for attempt_id in range(n_attempts):
             print("Attempt {}".format(attempt_id))
+
+            ###
             rgb_obs, depth_obs, _ = env.observe()
-            coord, angle, vis_img = model.predict_grasp(rgb_obs)
-            pick_pose = env.image_pose_to_pick_pose(coord, angle, depth_obs)
-            result = env.execute_grasp(*pick_pose)
-            if result:
-                # place
-                env.execute_place()
-            
+
+            if args.n_past_actions > 0:
+
+                model.past_actions = deque(maxlen=args.n_past_actions)
+
+                for j in range(args.n_past_actions):
+
+                    result = False
+                    
+                    coord, angle, vis_img = model.predict_grasp(rgb_obs)
+                    
+                    # NOTE: check if coord is out of original shape bound
+                    img_h, img_w = rgb_obs.shape[:2]
+                    coord = list(coord)
+                    coord[0] = max(coord[0], 0)
+                    coord[0] = min(coord[0], img_w-1)
+                    coord[1] = max(coord[1], 0)
+                    coord[1] = min(coord[1], img_h-1)
+                    coord = tuple(coord)
+
+                    pick_pose = env.image_pose_to_pick_pose(coord, angle, depth_obs)
+                    result = env.execute_grasp(*pick_pose)
+                    print('Success!' if result else 'Failed:(')
+                    
+                    if result:
+                        # place
+                        env.execute_place()
+                        break
+
+            ###
+
+            else:
+
+                #rgb_obs, depth_obs, _ = env.observe()
+                coord, angle, vis_img = model.predict_grasp(rgb_obs)
+                pick_pose = env.image_pose_to_pick_pose(coord, angle, depth_obs)
+                result = env.execute_grasp(*pick_pose)
+                if result:
+                    # place
+                    env.execute_place()
+                
             num_in = env.num_object_in_tote1()
             print("{}/{} objects moved".format(n_objects - num_in, n_objects))
 
             fname = os.path.join(vis_dir, '{}.png'.format(attempt_id))
             imsave(fname, vis_img)
+
         print("{} objects left in the bin.".format(num_in))
 
 

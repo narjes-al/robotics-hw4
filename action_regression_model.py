@@ -166,14 +166,14 @@ class ActionRegressionModel(nn.Module):
             rgb_tensor = torch.from_numpy(rgb_obs).to(torch.float32) / 255.0
             input_tensor = rgb_tensor.permute(2,0,1).unsqueeze(0).to(device)
 
-            prediction = self.predict(input_tensor).squeeze().cpu().numpy()
+            prediction = self.predict(input_tensor).squeeze().numpy()
             
             coord, angle_deg = recover_action(prediction)
         
 
         # ===============================================================================
         # visualization
-        rgb_img = input_tensor.squeeze(0).detach().cpu().numpy()
+        rgb_img = input_tensor.squeeze(0).detach().numpy()
         vis_img = self.visualize(rgb_img, prediction)
         return coord, angle_deg, vis_img
 
